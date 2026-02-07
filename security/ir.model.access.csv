@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_stock_lot_replacement_wizard,stock.lot.replacement.wizard,model_stock_lot_replacement_wizard,stock.group_stock_user,1,1,1,1
+access_stock_lot_replacement_line,stock.lot.replacement.line,model_stock_lot_replacement_line,stock.group_stock_user,1,1,1,1

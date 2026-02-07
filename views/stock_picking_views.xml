@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <!-- Herencia de la vista form del stock.picking para agregar botón Reemplazo -->
+    <record id="view_picking_form_replacement_button" model="ir.ui.view">
+        <field name="name">stock.picking.form.replacement.button</field>
+        <field name="model">stock.picking</field>
+        <field name="inherit_id" ref="stock.view_picking_form"/>
+        <field name="priority">30</field>
+        <field name="arch" type="xml">
+
+            <!-- Botón "Reemplazo" junto a los botones de acción -->
+            <xpath expr="//button[@name='button_validate']" position="after">
+                <field name="is_return_picking" invisible="1"/>
+                <button name="action_open_lot_replacement_wizard"
+                        string="🔄 Reemplazo"
+                        type="object"
+                        class="btn-primary"
+                        invisible="not is_return_picking or state != 'done'"
+                        groups="stock.group_stock_user"/>
+            </xpath>
+
+            <!-- Smart button para ver entregas de reemplazo -->
+            <xpath expr="//div[@name='button_box']" position="inside">
+                <field name="replacement_count" invisible="1"/>
+                <button name="action_view_replacement_pickings"
+                        type="object"
+                        class="oe_stat_button"
+                        icon="fa-exchange"
+                        invisible="replacement_count == 0">
+                    <field name="replacement_count"
+                           string="Reemplazos"
+                           widget="statinfo"/>
+                </button>
+            </xpath>
+
+            <!-- Mostrar referencia de devolución de origen si es entrega de reemplazo -->
+            <xpath expr="//field[@name='origin']" position="after">
+                <field name="replacement_origin_picking_id"
+                       string="Devolución de Origen"
+                       invisible="not replacement_origin_picking_id"
+                       readonly="1"/>
+            </xpath>
+
+        </field>
+    </record>
+
+</odoo>
