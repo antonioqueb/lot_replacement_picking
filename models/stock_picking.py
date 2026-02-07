@@ -26,11 +26,25 @@ class StockPicking(models.Model):
         compute='_compute_replacement_count',
     )
 
+    def _auto_init(self):
+        res = super()._auto_init()
+        self.env.cr.execute("""
+            UPDATE stock_picking sp
+            SET is_return_picking = TRUE
+            WHERE EXISTS (
+                SELECT 1 FROM stock_move sm
+                WHERE sm.picking_id = sp.id
+                AND sm.origin_returned_move_id IS NOT NULL
+            )
+            AND (sp.is_return_picking IS NULL OR sp.is_return_picking = FALSE)
+        """)
+        return res
+
     @api.depends('move_ids.origin_returned_move_id')
     def _compute_is_return_picking(self):
         for picking in self:
-            picking.is_return_picking = any(
-                m.origin_returned_move_id for m in picking.move_ids
+            picking.is_return_picking = bool(
+                picking.move_ids.filtered('origin_returned_move_id')
             )
 
     @api.depends('replacement_picking_ids')
