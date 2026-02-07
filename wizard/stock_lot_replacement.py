@@ -7,6 +7,21 @@ from odoo.tools.float_utils import float_compare
 _logger = logging.getLogger(__name__)
 
 
+def _resolve_id(record):
+    """Obtiene el ID real de un registro, resolviendo NewId si es necesario."""
+    if hasattr(record, '_origin') and record._origin:
+        return record._origin.id
+    rid = record.id
+    if isinstance(rid, int):
+        return rid
+    if hasattr(rid, 'origin'):
+        return rid.origin
+    try:
+        return int(rid)
+    except (TypeError, ValueError):
+        return False
+
+
 class StockLotReplacementWizard(models.TransientModel):
     _name = 'stock.lot.replacement.wizard'
     _description = 'Wizard de Reemplazo de Lotes'
@@ -55,7 +70,6 @@ class StockLotReplacementWizard(models.TransientModel):
         if picking.state != 'done':
             raise UserError(_('La devolución debe estar validada para crear un reemplazo.'))
 
-        # Buscar el tipo de operación de entrega (salida) del mismo almacén
         warehouse = picking.picking_type_id.warehouse_id
         delivery_type = self.env['stock.picking.type'].search([
             ('warehouse_id', '=', warehouse.id),
@@ -68,7 +82,6 @@ class StockLotReplacementWizard(models.TransientModel):
         res['picking_id'] = picking.id
         res['picking_type_id'] = delivery_type.id
 
-        # Generar líneas a partir de los move_lines de la devolución
         lines = []
         for move in picking.move_ids:
             if move.state != 'done':
@@ -76,7 +89,6 @@ class StockLotReplacementWizard(models.TransientModel):
             if move.product_id.tracking not in ('lot', 'serial'):
                 continue
 
-            # Obtener lotes devueltos
             done_lines = move.move_line_ids.filtered(
                 lambda ml: ml.state == 'done' and ml.lot_id
             )
@@ -85,14 +97,14 @@ class StockLotReplacementWizard(models.TransientModel):
                 lot_qty_map[ml.lot_id.id] = lot_qty_map.get(ml.lot_id.id, 0.0) + ml.quantity
 
             for lot_id, qty in lot_qty_map.items():
-                lot = self.env['stock.lot'].browse(lot_id)
                 lines.append((0, 0, {
                     'product_id': move.product_id.id,
                     'returned_lot_id': lot_id,
                     'returned_qty': qty,
                     'product_uom_id': move.product_uom.id,
                     'original_move_id': move.id,
-                    'to_replace': True,
+                    'to_replace': False,
+                    'replacement_lot_ids': False,
                 }))
 
         if not lines:
@@ -109,7 +121,6 @@ class StockLotReplacementWizard(models.TransientModel):
         if not active_lines:
             raise UserError(_('Seleccione al menos una línea para reemplazar.'))
 
-        # Validar que todas las líneas activas tengan lotes seleccionados
         lines_without_lots = active_lines.filtered(lambda l: not l.replacement_lot_ids)
         if lines_without_lots:
             products = ', '.join(lines_without_lots.mapped('product_id.name'))
@@ -120,8 +131,9 @@ class StockLotReplacementWizard(models.TransientModel):
         # Validar disponibilidad de stock
         for line in active_lines:
             for lot in line.replacement_lot_ids:
+                real_lot_id = _resolve_id(lot)
                 quant = self.env['stock.quant'].search([
-                    ('lot_id', '=', lot.id),
+                    ('lot_id', '=', real_lot_id),
                     ('product_id', '=', line.product_id.id),
                     ('location_id.usage', '=', 'internal'),
                     ('quantity', '>', 0),
@@ -135,13 +147,13 @@ class StockLotReplacementWizard(models.TransientModel):
         picking_vals = self._prepare_replacement_picking()
         new_picking = self.env['stock.picking'].create(picking_vals)
 
-        # Crear moves y move_lines
         for line in active_lines:
             move_vals = line._prepare_replacement_move(new_picking)
             new_move = self.env['stock.move'].create(move_vals)
 
             for lot in line.replacement_lot_ids:
-                qty = line._get_lot_available_qty(lot)
+                real_lot_id = _resolve_id(lot)
+                qty = line._get_lot_available_qty_by_id(real_lot_id)
                 if float_compare(qty, 0.0, precision_digits=4) <= 0:
                     continue
                 self.env['stock.move.line'].create({
@@ -149,14 +161,13 @@ class StockLotReplacementWizard(models.TransientModel):
                     'picking_id': new_picking.id,
                     'product_id': line.product_id.id,
                     'product_uom_id': line.product_uom_id.id,
-                    'lot_id': lot.id,
+                    'lot_id': real_lot_id,
                     'quantity': qty,
                     'location_id': new_move.location_id.id,
                     'location_dest_id': new_move.location_dest_id.id,
                     'company_id': new_picking.company_id.id,
                 })
 
-        # Confirmar el picking
         new_picking.action_confirm()
 
         _logger.info(
@@ -174,7 +185,6 @@ class StockLotReplacementWizard(models.TransientModel):
         }
 
     def _prepare_replacement_picking(self):
-        """Prepara los valores para crear el picking de reemplazo."""
         return {
             'picking_type_id': self.picking_type_id.id,
             'partner_id': self.partner_id.id,
@@ -199,31 +209,26 @@ class StockLotReplacementLine(models.TransientModel):
     product_id = fields.Many2one(
         'product.product',
         string='Producto',
-        required=True,
-        readonly=True,
+        required=False,
     )
     product_uom_id = fields.Many2one(
         'uom.uom',
         string='UdM',
-        readonly=True,
     )
     returned_lot_id = fields.Many2one(
         'stock.lot',
         string='Lote Devuelto',
-        readonly=True,
     )
     returned_qty = fields.Float(
         string='Cant. Devuelta',
-        readonly=True,
     )
     original_move_id = fields.Many2one(
         'stock.move',
         string='Movimiento Original',
-        readonly=True,
     )
     to_replace = fields.Boolean(
         string='Reemplazar',
-        default=True,
+        default=False,
     )
     replacement_lot_ids = fields.Many2many(
         'stock.lot',
@@ -240,19 +245,15 @@ class StockLotReplacementLine(models.TransientModel):
     )
     replacement_qty = fields.Float(
         string='Cant. a Entregar',
-        compute='_compute_replacement_qty',
-        store=True,
     )
 
     @api.depends('product_id')
     def _compute_available_lot_ids(self):
-        """Calcula lotes disponibles en inventario para el producto."""
         for line in self:
             if not line.product_id or line.product_id.tracking not in ('lot', 'serial'):
                 line.available_lot_ids = False
                 continue
 
-            # Buscar lotes con stock disponible en ubicaciones internas
             quants = self.env['stock.quant'].search([
                 ('product_id', '=', line.product_id.id),
                 ('location_id.usage', '=', 'internal'),
@@ -261,25 +262,27 @@ class StockLotReplacementLine(models.TransientModel):
             ])
             line.available_lot_ids = quants.mapped('lot_id')
 
-    @api.depends('replacement_lot_ids', 'to_replace')
-    def _compute_replacement_qty(self):
+    @api.onchange('replacement_lot_ids')
+    def _onchange_replacement_lot_ids(self):
         for line in self:
-            if not line.to_replace or not line.replacement_lot_ids:
+            if not line.replacement_lot_ids:
                 line.replacement_qty = 0.0
+                line.to_replace = False
                 continue
 
             total = 0.0
             for lot in line.replacement_lot_ids:
-                total += line._get_lot_available_qty(lot)
+                real_id = _resolve_id(lot)
+                if real_id:
+                    total += line._get_lot_available_qty_by_id(real_id)
             line.replacement_qty = total
-
-    @api.onchange('replacement_lot_ids')
-    def _onchange_replacement_lot_ids(self):
-        for line in self:
-            if line.replacement_lot_ids:
-                line.to_replace = True
-            else:
-                line.replacement_qty = 0.0
+            line.to_replace = total > 0
+            _logger.info(
+                '[LOT_REPLACEMENT] Onchange lot_ids: product=%s, lots=%s, total_qty=%s',
+                line.product_id.name,
+                [_resolve_id(l) for l in line.replacement_lot_ids],
+                total,
+            )
 
     @api.onchange('to_replace')
     def _onchange_to_replace(self):
@@ -288,17 +291,16 @@ class StockLotReplacementLine(models.TransientModel):
                 line.replacement_lot_ids = [(5, 0, 0)]
                 line.replacement_qty = 0.0
 
-    def _get_lot_available_qty(self, lot):
-        """Obtiene la cantidad disponible de un lote en ubicaciones internas."""
+    def _get_lot_available_qty_by_id(self, lot_id):
+        """Obtiene la cantidad disponible de un lote por ID entero."""
         quants = self.env['stock.quant'].search([
-            ('lot_id', '=', lot.id),
+            ('lot_id', '=', lot_id),
             ('product_id', '=', self.product_id.id),
             ('location_id.usage', '=', 'internal'),
         ])
         return sum(quants.mapped('quantity'))
 
     def _prepare_replacement_move(self, picking):
-        """Prepara los valores del stock.move de reemplazo."""
         return {
             'name': _('Reemplazo: %s') % self.product_id.display_name,
             'product_id': self.product_id.id,
