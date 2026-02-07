@@ -33,19 +33,19 @@
 
                         <!-- Campos técnicos ocultos -->
                         <field name="available_lot_ids" column_invisible="1"/>
-                        <field name="original_move_id" column_invisible="1"/>
+                        <field name="original_move_id" column_invisible="1" force_save="1"/>
 
                         <!-- Checkbox reemplazar -->
                         <field name="to_replace" string="✓" width="40px"/>
 
                         <!-- Producto -->
-                        <field name="product_id" readonly="1"/>
+                        <field name="product_id" readonly="1" force_save="1"/>
 
                         <!-- Lote devuelto -->
-                        <field name="returned_lot_id" string="Lote Devuelto" readonly="1"/>
+                        <field name="returned_lot_id" string="Lote Devuelto" readonly="1" force_save="1"/>
 
                         <!-- Cantidad devuelta -->
-                        <field name="returned_qty" string="Cant. Devuelta" readonly="1"/>
+                        <field name="returned_qty" string="Cant. Devuelta" readonly="1" force_save="1"/>
 
                         <!-- Lotes de reemplazo como tags -->
                         <field name="replacement_lot_ids"
@@ -59,11 +59,12 @@
                         <field name="replacement_qty"
                                string="Cant. a Entregar"
                                readonly="1"
+                               force_save="1"
                                decoration-info="replacement_qty > 0"
                                decoration-danger="replacement_qty == 0 and to_replace"/>
 
                         <!-- UdM -->
-                        <field name="product_uom_id" string="UdM" readonly="1"/>
+                        <field name="product_uom_id" string="UdM" readonly="1" force_save="1"/>
                     </list>
                 </field>
 
@@ -82,7 +83,6 @@
         </field>
     </record>
 
-    <!-- Acción para abrir el wizard -->
     <record id="action_stock_lot_replacement_wizard" model="ir.actions.act_window">
         <field name="name">Reemplazo de Lotes</field>
         <field name="res_model">stock.lot.replacement.wizard</field>

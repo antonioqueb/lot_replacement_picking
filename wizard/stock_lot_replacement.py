@@ -130,8 +130,12 @@ class StockLotReplacementWizard(models.TransientModel):
 
         # Validar disponibilidad de stock
         for line in active_lines:
+            if not line.product_id:
+                raise UserError(_('Error interno: una línea no tiene producto asignado.'))
             for lot in line.replacement_lot_ids:
                 real_lot_id = _resolve_id(lot)
+                if not real_lot_id:
+                    raise UserError(_('No se pudo resolver el ID del lote "%s".') % lot.name)
                 quant = self.env['stock.quant'].search([
                     ('lot_id', '=', real_lot_id),
                     ('product_id', '=', line.product_id.id),
@@ -141,7 +145,7 @@ class StockLotReplacementWizard(models.TransientModel):
                 if not quant:
                     raise UserError(_(
                         'El lote "%s" del producto "%s" no tiene stock disponible.'
-                    ) % (lot.name, line.product_id.name))
+                    ) % (lot.name, line.product_id.display_name))
 
         # Crear el picking de reemplazo
         picking_vals = self._prepare_replacement_picking()
@@ -209,7 +213,7 @@ class StockLotReplacementLine(models.TransientModel):
     product_id = fields.Many2one(
         'product.product',
         string='Producto',
-        required=False,
+        required=True,
     )
     product_uom_id = fields.Many2one(
         'uom.uom',
